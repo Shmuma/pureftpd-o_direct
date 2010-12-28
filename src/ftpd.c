@@ -63,6 +63,7 @@ void usleep2(const unsigned long microsec)
 }
 #endif
 
+
 int safe_write(const int fd, const void *buf_, size_t count)
 {
     ssize_t written;    
@@ -85,6 +86,57 @@ int safe_write(const int fd, const void *buf_, size_t count)
     }
     return 0;
 }
+
+
+/* count == 0 have special meaning - flush all rest of data, regardless of alignment (file must be truncated  */
+int safe_direct_write (const int fd, const void* buf_, size_t count)
+{
+    static char* static_buf = NULL;
+    static char* aligned_buf = NULL;
+    static int size;
+    static int page;
+    static unsigned long long total = 0;
+    const char* buf = (char*)buf_;
+    size_t ofs = 0;
+
+    if (!page)
+        page = getpagesize ();
+
+    if (!aligned_buf) {
+        static_buf = (char*)malloc (page * 2);
+        aligned_buf = (char*)(((unsigned long)(static_buf + page - 1)) & (~(page - 1)));
+        size = 0;
+    }
+
+    if (count == 0) {
+        safe_write (fd, aligned_buf, page);
+        free (static_buf);
+        aligned_buf = static_buf = NULL;
+        ofs = 0;
+        ftruncate (fd, total);
+        total = 0;
+    }
+    else {
+        while (count + size >= page) {
+            memcpy (aligned_buf + size, buf + ofs, page - size);
+            ofs += page - size;
+            count -= page - size;
+            if (safe_write (fd, aligned_buf, page))
+                return -1;
+            size = 0;
+            total += page;
+        }
+
+        if (count > 0) {
+            memcpy (aligned_buf + size, buf + ofs, count);
+            size += count;
+            total += count;
+        }
+    }
+
+    return 0;
+}
+
 
 #ifdef WITH_TLS
 int secure_safe_write(const void *buf_, size_t count)
@@ -3865,7 +3917,7 @@ void dostor(char *name, const int append, const int autorename)
             goto end;
         }
     }
-    if ((f = open(atomic_file, O_CREAT | O_WRONLY,
+    if ((f = open(atomic_file, O_CREAT | O_WRONLY | O_DIRECT,
                   (mode_t) 0777 & ~u_mask)) == -1) {
         error(553, MSG_OPEN_FAILURE2);
         goto end;
@@ -3974,6 +4026,7 @@ void dostor(char *name, const int append, const int autorename)
         if (xferfd == -1 ||
             select(xferfd + 1, &rs, NULL, NULL, &tv) <= 0) {
             databroken:
+            safe_direct_write (f, NULL, 0);
             (void) close(f);
             closedata();
             if (atomic_file != NULL) {
@@ -4058,18 +4111,19 @@ void dostor(char *name, const int append, const int autorename)
                         }
                         i++;
                     }
-                    if ((w = safe_write(f, cpy, asciibytes)) == 0) {
+                    if ((w = safe_direct_write(f, cpy, asciibytes)) == 0) {
                         filesize += (off_t) asciibytes;                 
                     }
                 } else
 #endif
                 {
-                    if ((w = safe_write(f, p, (size_t) r)) == 0) {
+                    if ((w = safe_direct_write(f, p, (size_t) r)) == 0) {
                         filesize += (off_t) r;
                     }
                 }
                 if (w < 0) {
                     errasc:
+                    safe_direct_write (f, NULL, 0);
 #ifdef QUOTAS
                     dostor_quota_update_close_f(overwrite, filesize,
                                                 restartat, atomic_file, 
@@ -4121,6 +4175,7 @@ void dostor(char *name, const int append, const int autorename)
         dostor_quota_update_close_f(overwrite, filesize, restartat,
                                     atomic_file, name, f);
 #else
+    safe_direct_write (f, NULL, 0);
     (void) close(f);
 #endif
     uploaded += (unsigned long long) (filesize - restartat);
