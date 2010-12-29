@@ -63,7 +63,6 @@ void usleep2(const unsigned long microsec)
 }
 #endif
 
-
 int safe_write(const int fd, const void *buf_, size_t count)
 {
     ssize_t written;    
@@ -98,6 +97,7 @@ int safe_direct_write (const int fd, const void* buf_, size_t count)
     static unsigned long long total = 0;
     const char* buf = (char*)buf_;
     size_t ofs = 0;
+    int delta;
 
     if (!page)
         page = getpagesize ();
@@ -118,13 +118,14 @@ int safe_direct_write (const int fd, const void* buf_, size_t count)
     }
     else {
         while (count + size >= page) {
-            memcpy (aligned_buf + size, buf + ofs, page - size);
-            ofs += page - size;
-            count -= page - size;
+            delta = page - size;
+            memcpy (aligned_buf + size, buf + ofs, delta);
+            ofs += delta;
+            count -= delta;
             if (safe_write (fd, aligned_buf, page))
                 return -1;
             size = 0;
-            total += page;
+            total += delta;
         }
 
         if (count > 0) {
