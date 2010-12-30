@@ -87,6 +87,7 @@ int safe_write(const int fd, const void *buf_, size_t count)
 }
 
 
+
 /* count == 0 have special meaning - flush all rest of data, regardless of alignment (file must be truncated  */
 int safe_direct_write (const int fd, const void* buf_, size_t count)
 {
@@ -99,11 +100,13 @@ int safe_direct_write (const int fd, const void* buf_, size_t count)
     size_t ofs = 0;
     int delta;
 
+#define PAGES_COUNT 1024
+
     if (!page)
         page = getpagesize ();
 
     if (!aligned_buf) {
-        static_buf = (char*)malloc (page * 2);
+        static_buf = (char*)malloc (page * PAGES_COUNT + 1);
         aligned_buf = (char*)(((unsigned long)(static_buf + page - 1)) & (~(page - 1)));
         size = 0;
     }
@@ -117,12 +120,12 @@ int safe_direct_write (const int fd, const void* buf_, size_t count)
         total = 0;
     }
     else {
-        while (count + size >= page) {
-            delta = page - size;
+        while (count + size >= page * PAGES_COUNT) {
+            delta = page*PAGES_COUNT - size;
             memcpy (aligned_buf + size, buf + ofs, delta);
             ofs += delta;
             count -= delta;
-            if (safe_write (fd, aligned_buf, page))
+            if (safe_write (fd, aligned_buf, page * PAGES_COUNT))
                 return -1;
             size = 0;
             total += delta;
