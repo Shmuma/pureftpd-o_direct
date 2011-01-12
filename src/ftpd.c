@@ -112,7 +112,8 @@ int safe_direct_write (const int fd, const void* buf_, size_t count)
     }
 
     if (count == 0) {
-        safe_write (fd, aligned_buf, page);
+        /* write size bytes, rounded up to page size (to met O_DIRECT rules) */
+        safe_write (fd, aligned_buf, (size + page - 1) & (~(page-1)));
         free (static_buf);
         aligned_buf = static_buf = NULL;
         ofs = 0;
